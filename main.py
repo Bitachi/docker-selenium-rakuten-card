@@ -95,12 +95,12 @@ def handler(event, context):
         options = webdriver.ChromeOptions()
 
         # Lambdaで必須のオプション
-        options.add_argument('--headless') # ヘッドレスモードで実行
-        options.add_argument('--no-sandbox') # サンドボックス無効化 (Lambdaで必須)
-        options.add_argument('--disable-dev-shm-usage') # 共有メモリの使用を無効化 (Lambdaで必須)
-        options.add_argument('--disable-gpu') # GPU使用を無効化
-        options.add_argument('--window-size=1920x1080') # ウィンドウサイズ指定 (必要に応じて調整)
-        options.add_argument('--single-process') # シングルプロセスモード (Lambdaでリソース節約)
+        options.add_argument('--headless')
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--disable-gpu') # 必須ではないが、推奨
+        options.add_argument('--window-size=1920x1080') # 必須ではないが、推奨
+        options.add_argument('--single-process') # Lambdaでリソース節約
         options.add_argument('--disable-extensions')
         options.add_argument('--disable-background-networking')
         options.add_argument('--disable-default-apps')
@@ -110,11 +110,17 @@ def handler(event, context):
         options.add_argument('--metrics-recording-only')
         options.add_argument('--mute-audio')
         options.add_argument('--no-first-run')
-        options.add_argument('--disable-setuid-sandbox') # 追加
-        options.add_argument('--disable-backgrounding-occluded-windows') # 追加
-        options.add_argument('--disable-ipc-flooding-protection') # 追加
-        options.add_argument('--disable-renderer-backgrounding') # 追加
-        # options.add_argument('--remote-debugging-port=9222') # デバッグ用 (本番では不要)
+        # 以下を追加してみる
+        options.add_argument('--disable-setuid-sandbox') # 重要: no-sandboxと合わせて
+        options.add_argument('--disable-backgrounding-occluded-windows')
+        options.add_argument('--disable-ipc-flooding-protection')
+        options.add_argument('--disable-renderer-backgrounding')
+        options.add_argument('--enable-automation') # ツールによる制御を有効にする
+        options.add_argument('--start-maximized') # ウィンドウサイズを最大化
+        options.add_argument('--user-data-dir=/tmp/user-data') # ユーザープロファイルを/tmpに
+        options.add_argument('--data-path=/tmp/data-path') # データパスを/tmpに
+        options.add_argument('--disk-cache-dir=/tmp/cache-dir') # キャッシュを/tmpに
+        # options.binary_location は必ず正しいパスを指定
         options.binary_location = chrome_binary_path # Chromeバイナリのパスを指定
 
         # WebDriverの起動
