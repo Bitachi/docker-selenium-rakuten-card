@@ -11,6 +11,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
 
 from bs4 import BeautifulSoup
+import boto3
 
 # --- 環境変数のロード (ローカルテスト用、Lambdaでは環境変数から直接取得) ---
 load_dotenv()
@@ -22,6 +23,46 @@ LOGIN_USER_ID = os.getenv("ID") # .envのID
 LOGIN_PASSWORD = os.getenv("PW") # .envのPW
 
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
+# S3バケット名も環境変数で設定
+SCREENSHOT_BUCKET = os.getenv("SCREENSHOT_BUCKET") # スクリーンショット保存用のS3バケット名
+# HTMLソースを保存するためのS3バケット名（スクリーンショットと同じでも良い）
+HTML_SOURCE_BUCKET = os.getenv("HTML_SOURCE_BUCKET", SCREENSHOT_BUCKET)
+
+# --- デバッグ用：S3にファイルをアップロードするヘルパー関数 ---
+def upload_file_to_s3(file_name, bucket, object_name=None, content_type=None):
+    """S3にファイルをアップロードする"""
+    if object_name is None:
+        object_name = os.path.basename(file_name)
+
+    s3_client = boto3.client('s3')
+    try:
+        extra_args = {}
+        if content_type:
+            extra_args['ContentType'] = content_type
+
+        s3_client.upload_file(file_name, bucket, object_name, ExtraArgs=extra_args)
+        print(f"ファイル {file_name} を S3://{bucket}/{object_name} にアップロードしました。")
+        return True
+    except Exception as e:
+        print(f"S3アップロードエラー: {e}")
+        return False
+    
+# --- デバッグ用：現在のHTMLソースをファイルに保存し、S3にアップロードする関数 ---
+def save_html_and_upload(driver, bucket, request_id, step_name):
+    """現在のHTMLソースを取得し、/tmpに保存してS3にアップロードする"""
+    html_content = driver.page_source
+    file_path = f"/tmp/{step_name}.html"
+    object_key = f"{request_id}/{step_name}.html"
+
+    try:
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(html_content)
+        print(f"HTMLソースを {file_path} に保存しました。")
+        upload_file_to_s3(file_path, bucket, object_key, content_type='text/html')
+        return f"s3://{bucket}/{object_key}"
+    except Exception as e:
+        print(f"HTMLソースの保存またはS3アップロードエラー: {e}")
+        return None
 
 # --- Slackメッセージ送信関数 ---
 def send_slack_message(card1_money_amount, card2_money_amount):
@@ -48,13 +89,19 @@ def send_slack_message(card1_money_amount, card2_money_amount):
             print(f"Slackレスポンス: {response.text}")
 
 # --- 金額取得関数 ---
-def get_money_amount(driver, card_detail_url): # URLを引数に追加
+def get_money_amount(driver, card_detail_url, context): # URLを引数に追加
     #カード明細ページへ
     print(f"カード明細ページへ移動: {card_detail_url}")
     driver.get(card_detail_url)
 
     # 金額表示の親要素を特定するまで待機
     print("金額表示のdiv要素を待機中...")
+
+    #デバッグ用
+    #screenshot_path = "/tmp/06_before_final_wait.png"
+    #driver.save_screenshot(screenshot_path)
+    #upload_file_to_s3(screenshot_path, SCREENSHOT_BUCKET, f"{context.aws_request_id}/06_before_final_wait.png")
+    #html_log_urls['06_before_final_wait'] = save_html_and_upload(driver, HTML_SOURCE_BUCKET, context.aws_request_id, "06_before_final_wait")
     parent_div = WebDriverWait(driver, 30).until( # タイムアウトを長めに
         EC.presence_of_element_located((By.CLASS_NAME, "stmt-about-payment__money__main__num"))
     )
@@ -94,6 +141,8 @@ def handler(event, context):
         service = Service(executable_path=chrome_driver_path)
         options = webdriver.ChromeOptions()
 
+
+
         # Lambdaで必須のオプション
         options.add_argument('--headless')
         options.add_argument('--no-sandbox')
@@ -120,6 +169,7 @@ def handler(event, context):
         options.add_argument('--user-data-dir=/tmp/user-data') # ユーザープロファイルを/tmpに
         options.add_argument('--data-path=/tmp/data-path') # データパスを/tmpに
         options.add_argument('--disk-cache-dir=/tmp/cache-dir') # キャッシュを/tmpに
+        options.add_argument(f"user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.112 Safari/537.36")
         # options.binary_location は必ず正しいパスを指定
         options.binary_location = chrome_binary_path # Chromeバイナリのパスを指定
 
@@ -166,14 +216,21 @@ def handler(event, context):
 
         # ログイン後のページ読み込みを待つ（金額表示のdivなど）
         print("ログイン後のページ読み込みを待機中...")
-        WebDriverWait(driver, 30).until(
-            EC.presence_of_element_located((By.CLASS_NAME, "stmt-about-payment__money__main__num"))
+        #デバッグ用　スクリーンショットとhtml sourceを取得
+        #screenshot_path = "/tmp/06_before_final_wait.png"
+        #driver.save_screenshot(screenshot_path)
+        #upload_file_to_s3(screenshot_path, SCREENSHOT_BUCKET, f"{context.aws_request_id}/06_before_final_wait.png")
+        #html_log_urls['06_before_final_wait'] = save_html_and_upload(driver, HTML_SOURCE_BUCKET, context.aws_request_id, "06_before_final_wait")
+
+        WebDriverWait(driver, 60).until(
+            EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "ようこそ")
         )
         print("ログイン後のページがロードされました。")
 
         # --- カード1の金額取得 ---
         print("カード1の金額を取得します...")
-        card1_money_amount = get_money_amount(driver, CARD_DETAIL_URL)
+        time.sleep(5)
+        card1_money_amount = get_money_amount(driver, CARD_DETAIL_URL, context)
 
         # --- カード切り替え ---
         # j_idt631:card の <select> 要素を待機
@@ -196,7 +253,7 @@ def handler(event, context):
 
         # --- カード2の金額取得 ---
         print("カード2の金額を取得します...")
-        card2_money_amount = get_money_amount(driver, CARD_DETAIL_URL)
+        card2_money_amount = get_money_amount(driver, CARD_DETAIL_URL, context)
 
         # Slack通知
         if card1_money_amount is not None and card2_money_amount is not None:
