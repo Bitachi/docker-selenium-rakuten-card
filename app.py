@@ -134,8 +134,8 @@ def get_website_content(url):
             print("WebDriverを閉じました。")
 
 if __name__ == "__main__":
-    target_url = "https://www.rakuten-card.co.jp/e-navi/members/?l-id=corp_oo_top_to_loginenavi" # アクセスしたいURLを指定してください#
-    card_detail_url = "https://www.rakuten-card.co.jp/e-navi/members/statement/index.xhtml?tabNo=0"
+    target_url = os.getenv("TARGET_URL")
+    card_detail_url = os.getenv("CARD_DETAIL_URL")
 
     card1_money_amount, card2_money_amount = get_website_content(target_url)
     send_slack_message(card1_money_amount, card2_money_amount)
